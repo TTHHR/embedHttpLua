@@ -35,10 +35,15 @@ static uintptr_t get_main_module_base() {
     fclose(f);
     return base;
 }
-// 包装函数：将地址转为函数指针并执行
-static void call_c_func_int(void* addr, int arg) {
-    func_int_t f = (func_int_t)addr;
-    f(arg);
+// 定义一个支持 8 个参数的通用函数类型
+typedef uintptr_t (*generic_ffi_func)(uintptr_t, uintptr_t, uintptr_t, uintptr_t,
+                                     uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+
+static uintptr_t call_any_c(void* addr, uintptr_t a1, uintptr_t a2, uintptr_t a3, uintptr_t a4,
+                                     uintptr_t a5, uintptr_t a6, uintptr_t a7, uintptr_t a8) {
+    generic_ffi_func f = (generic_ffi_func)addr;
+    // 强制填满 8 个寄存器 (X0-X7)
+    return f(a1, a2, a3, a4, a5, a6, a7, a8);
 }
 */
 import "C"
@@ -178,13 +183,52 @@ func luaWriteInt32(L *lua.LState) int {
 	return 0
 }
 
+// 写入 float32
+func luaWriteFloat32(L *lua.LState) int {
+	addr := uintptr(L.CheckNumber(1))
+	val := float32(L.CheckNumber(2))
+
+	ptr := (*float32)(unsafe.Pointer(addr))
+	*ptr = val
+	return 0
+}
+
+// 写入 1 字节
+func luaWriteByte(L *lua.LState) int {
+	addr := uintptr(L.CheckNumber(1))
+	val := byte(L.CheckInt(2))
+
+	*(*byte)(unsafe.Pointer(addr)) = val
+	return 0
+}
+func luaReadPtr(L *lua.LState) int {
+	addr := uintptr(L.CheckNumber(1))
+	// 读取该地址处存放的指针值
+	val := *(*uintptr)(unsafe.Pointer(addr))
+	L.Push(lua.LNumber(val))
+	return 1
+}
+
 // luaCallC(address, value)
 func luaCallC(L *lua.LState) int {
 	addr := uintptr(L.CheckNumber(1))
-	arg := L.CheckInt(2)
 
-	// 调用 C 包装函数
-	C.call_c_func_int(unsafe.Pointer(addr), C.int(arg))
+	// 从 Lua 栈中读取参数，如果没传则补 0
+	// uintptr_t 在 ARM64 下是 64 位，完美兼容 int, long 和 指针
+	a1 := uintptr(L.OptNumber(2, 0))
+	a2 := uintptr(L.OptNumber(3, 0))
+	a3 := uintptr(L.OptNumber(4, 0))
+	a4 := uintptr(L.OptNumber(5, 0))
+	a5 := uintptr(L.OptNumber(6, 0))
+	a6 := uintptr(L.OptNumber(7, 0))
+	a7 := uintptr(L.OptNumber(8, 0))
+	a8 := uintptr(L.OptNumber(9, 0))
+
+	ret := C.call_any_c(unsafe.Pointer(addr),
+		C.uintptr_t(a1), C.uintptr_t(a2), C.uintptr_t(a3), C.uintptr_t(a4),
+		C.uintptr_t(a5), C.uintptr_t(a6), C.uintptr_t(a7), C.uintptr_t(a8))
+
+	L.Push(lua.LNumber(ret))
 
 	return 0 // 无返回值给 Lua
 }
@@ -246,6 +290,9 @@ func InitLib() {
 	L.SetGlobal("make_writable", L.NewFunction(luaMakeWritable))
 	L.SetGlobal("get_arch", L.NewFunction(luaGetArch))
 	L.SetGlobal("write_int32", L.NewFunction(luaWriteInt32))
+	L.SetGlobal("write_float", L.NewFunction(luaWriteFloat32))
+	L.SetGlobal("write_byte", L.NewFunction(luaWriteByte))
+	L.SetGlobal("read_ptr", L.NewFunction(luaReadPtr))
 	L.SetGlobal("call_c", L.NewFunction(luaCallC))
 
 	go startHTTPServer()
