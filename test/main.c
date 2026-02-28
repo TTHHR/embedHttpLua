@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <dlfcn.h>
-#include "libembedhttplua.h"
 
 int target_value = 100;
 
