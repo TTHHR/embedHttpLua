@@ -1,0 +1,7 @@
+这是一个为嵌入式程序增加lua动态hook调试的代码
+使用方法：
+使用脚本编译出目标动态库
+在嵌入式程序中加载动态库，并调用InitLib函数
+访问http://ip:1532，输入lua脚本进行调试
+
+test/main.c是一个测试程序，模拟了一个嵌入式程序的环境，提供了一个全局变量target_value和一个函数avm_site_action来修改这个变量的值。通过访问http://localhost:1532，可以输入lua脚本来调用avm_site_action函数，从而修改target_value的值，实现动态调试的效果。
