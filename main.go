@@ -2,7 +2,6 @@ package main
 
 /*
 #cgo CFLAGS: -I./include
-#cgo LDFLAGS: -L./lib -lfrida-gum -ldl -lm -lrt -lpthread
 #include "frida-gum.h"
 #include "frida-handler.h"
 #include <stdlib.h>
@@ -33,8 +32,11 @@ func go_on_enter_handler(addr uintptr, ic *C.GumInvocationContext) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	if cb, ok := hookRegistry[addr]; ok {
-		// 调用 Lua 回调
-		if err := L.CallByParam(lua.P{Fn: cb, NRet: 0, Protect: true}, lua.LNumber(addr)); err != nil {
+		ud := L.NewUserData()
+		ud.Value = uintptr(unsafe.Pointer(ic))
+
+		// 调用 Lua: cb(ic, addr)
+		if err := L.CallByParam(lua.P{Fn: cb, NRet: 0, Protect: true}, ud, lua.LNumber(addr)); err != nil {
 			fmt.Printf("[Lua Error] %v\n", err)
 		}
 	}
@@ -100,6 +102,29 @@ func luaReadPtr(L *lua.LState) int {
 	L.Push(lua.LNumber(val))
 	return 1
 }
+func luaGetArg(L *lua.LState) int {
+	ic := (*C.GumInvocationContext)(unsafe.Pointer(L.CheckUserData(1).Value.(uintptr)))
+	index := L.CheckInt(2)
+	// 调用 Frida-Gum API 获取参数
+	val := C.gum_invocation_context_get_nth_argument(ic, C.uint(index))
+	L.Push(lua.LNumber(uintptr(val)))
+	return 1
+}
+
+func luaReplaceArg(L *lua.LState) int {
+	ic := (*C.GumInvocationContext)(unsafe.Pointer(L.CheckUserData(1).Value.(uintptr)))
+	index := L.CheckInt(2)
+	newVal := uintptr(L.CheckNumber(3))
+	C.gum_invocation_context_replace_nth_argument(ic, C.guint(index), C.gpointer(unsafe.Pointer(newVal)))
+	return 0
+}
+
+func luaReplaceRet(L *lua.LState) int {
+	ic := (*C.GumInvocationContext)(unsafe.Pointer(L.CheckUserData(1).Value.(uintptr)))
+	newRet := uintptr(L.CheckNumber(2))
+	C.gum_invocation_context_replace_return_value(ic, C.gpointer(unsafe.Pointer(newRet)))
+	return 0
+}
 
 func resetAllHooks() {
 	mutex.Lock()
@@ -163,7 +188,9 @@ func InitLib() {
 	L.SetGlobal("read_mem", L.NewFunction(luaReadMem))
 	L.SetGlobal("write_int32", L.NewFunction(luaWriteInt32))
 	L.SetGlobal("read_ptr", L.NewFunction(luaReadPtr))
-
+	L.SetGlobal("get_arg", L.NewFunction(luaGetArg))
+	L.SetGlobal("set_arg", L.NewFunction(luaReplaceArg))
+	L.SetGlobal("set_ret", L.NewFunction(luaReplaceRet))
 	go startHTTPServer()
 }
 
