@@ -11,6 +11,7 @@ void init_gum();
 int attach_hook(uintptr_t addr);
 void reset_all_hooks();
 uintptr_t find_symbol(const char* name);
+uintptr_t find_lib_symbol(const char* libName,const char* name) ;
 #if defined(__cplusplus)
 }
 #endif

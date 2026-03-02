@@ -31,8 +31,22 @@ void init_gum() {
 
 uintptr_t find_symbol(const char* name) {
     init_gum();
-    // 官方示例使用的是 gum_module_find_global_export_by_name
     return (uintptr_t) gum_module_find_global_export_by_name(name);
+}
+
+uintptr_t find_lib_symbol(const char* libName,const char* name) {
+    init_gum();
+    GumModule * module = gum_process_find_module_by_name(libName);
+    if (module == NULL) {
+        return 0; // 找不到该库
+    }
+    // 2. 在该模块内查找导出符号
+    GumAddress addr = gum_module_find_export_by_name(module, name);
+    
+    // 3. 释放模块对象
+    g_object_unref(module); 
+    
+    return (uintptr_t)addr;
 }
 
 int attach_hook(uintptr_t addr) {

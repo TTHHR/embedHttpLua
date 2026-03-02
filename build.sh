@@ -45,7 +45,7 @@ build_linux_arm64() {
 
 build_android_arm64() {
     echo "Building Android ARM64..."
-    export CGO_LDFLAGS="-L$(pwd)/lib/android_arm64 -lfrida-gum -ldl -lm"
+    export CGO_LDFLAGS="-L$(pwd)/lib/android_arm64 -lfrida-gum -ldl -lm -llog"
     NDK_HOME=~/Android/Sdk/ndk/25.1.8937393
     TOOLCHAIN=$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
 

@@ -5,6 +5,17 @@ package main
 #include "frida-gum.h"
 #include "frida-handler.h"
 #include <stdlib.h>
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+
+static inline void device_log(int level, const char* tag, const char* msg) {
+#ifdef __ANDROID__
+    __android_log_print(level, tag, "%s", msg);
+#else
+    printf("[%s] %s\n", tag, msg);
+#endif
+}
 */
 import "C"
 import (
@@ -42,6 +53,20 @@ func go_on_enter_handler(addr uintptr, ic *C.GumInvocationContext) {
 	}
 }
 
+const (
+	LogDebug = 3
+	LogInfo  = 4
+	LogError = 6
+)
+
+func LogToDevice(level int, tag string, msg string) {
+	cTag := C.CString(tag)
+	cMsg := C.CString(msg)
+	defer C.free(unsafe.Pointer(cTag))
+	defer C.free(unsafe.Pointer(cMsg))
+	C.device_log(C.int(level), cTag, cMsg)
+}
+
 // --- Lua 导出函数 ---
 
 func luaHook(L *lua.LState) int {
@@ -58,20 +83,45 @@ func luaHook(L *lua.LState) int {
 }
 
 func luaGetSym(L *lua.LState) int {
-	name := L.CheckString(1)
-	cName := C.CString(name)
-	fmt.Printf("Looking up symbol: %s\n", name)
-	defer C.free(unsafe.Pointer(cName))
+	var addr C.uintptr_t
+	var name string
+	var libName string
 
-	addr := C.find_symbol(cName)
-	fmt.Printf("Symbol lookup: %s -> 0x%lx\n", name, uintptr(addr))
+	top := L.GetTop()
+
+	if top >= 2 {
+		// 模式 A: get_sym("libavm.so", "func_name")
+		libName = L.CheckString(1)
+		name = L.CheckString(2)
+
+		cLibName := C.CString(libName)
+		cName := C.CString(name)
+		defer C.free(unsafe.Pointer(cLibName))
+		defer C.free(unsafe.Pointer(cName))
+
+		addr = C.find_lib_symbol(cLibName, cName)
+	} else {
+		// 模式 B: get_sym("func_name") - 全局查找
+		name = L.CheckString(1)
+		cName := C.CString(name)
+		defer C.free(unsafe.Pointer(cName))
+		addr = C.find_symbol(cName)
+	}
+
+	// 日志输出
+	displayTag := name
+	if libName != "" {
+		displayTag = fmt.Sprintf("[%s]%s", libName, name)
+	}
+
 	if addr == 0 {
-		fmt.Printf("[Go] Symbol not found: %s\n", name)
+		LogToDevice(LogError, "Symbol Lookup", fmt.Sprintf("Failed: %s", displayTag))
 		L.Push(lua.LNil)
 	} else {
-		fmt.Printf("[Go] Symbol found: %s -> 0x%x\n", name, uint64(addr))
+		LogToDevice(LogInfo, "Symbol Lookup", fmt.Sprintf("Success: %s -> 0x%x", displayTag, uint64(addr)))
 		L.Push(lua.LNumber(uintptr(addr)))
 	}
+
 	return 1
 }
 
@@ -173,7 +223,7 @@ func startHTTPServer() {
 			fmt.Fprint(w, "脚本部署成功，Hook 已生效")
 		}
 	})
-	fmt.Println("Control Server: http://localhost:1532/upload")
+	LogToDevice(LogInfo, "Control Server", "http://localhost:1532/upload")
 	http.ListenAndServe(":1532", nil)
 }
 
@@ -191,6 +241,11 @@ func InitLib() {
 	L.SetGlobal("get_arg", L.NewFunction(luaGetArg))
 	L.SetGlobal("set_arg", L.NewFunction(luaReplaceArg))
 	L.SetGlobal("set_ret", L.NewFunction(luaReplaceRet))
+	L.SetGlobal("print", L.NewFunction(func(L *lua.LState) int {
+		arg := L.CheckAny(1)
+		LogToDevice(LogInfo, "LuaEngine", arg.String())
+		return 0
+	}))
 	go startHTTPServer()
 }
 
